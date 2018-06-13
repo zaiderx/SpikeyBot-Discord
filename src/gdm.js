@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
+const auth = require('../auth.js');
 require('./subModule.js')(GDM); // Extends the SubModule class.
 
 /**
@@ -16,9 +17,7 @@ function GDM() {
   /** @inheritdoc */
   this.myName = 'GDM';
 
-  let oauthURL = 'https://discordapp.com/oauth2/authorize?client_id=' +
-      '318552464356016131&redirect_uri=https%3A%2F%2Fwww.spikeybot.com%2' +
-      'Fredirect&response_type=code&scope=gdm.join';
+  let oauthURL = 'https://www.spikeybot.com/gdm/';
 
   let app = http.createServer(handler);
   app.on('error', console.error);
@@ -39,6 +38,20 @@ function GDM() {
     path: '/api/oauth2/token',
     method: 'POST',
   };
+  /**
+   * The url to send a request to the discord api.
+   *
+   * @private
+   * @default
+   * @type {{host: string, path: string, protocol: string}}
+   * @constant
+   */
+  const apiHost = {
+    protocol: 'https:',
+    host: 'discordapp.com',
+    path: '/api',
+    method: 'GET',
+  };
 
   /**
    * Stores all user tokens.
@@ -53,22 +66,21 @@ function GDM() {
       console.error(err);
       return;
     }
-    tokens = JSON.parse(data || {});
+    tokens = JSON.parse(data);
   });
 
   /** @inheritdoc */
   this.initialize = function() {
     self.command.on('gdm', commandGDM, true);
-    oauthURL = 'https://discordapp.com/oauth2/authorize?client_id=' +
-        self.Discord.client.id + '&redirect_uri=https%3A%2F%2Fwww.spikeybot.' +
-        'com%2Fredirect&response_type=code&scope=gdm.join';
   };
   /** @inheritdoc */
   this.shutdown = function() {
     app.close();
     self.command.deleteEvent('gdm');
     fs.writeFile(
-        './save/gdmTokens.json', JSON.stringify(tokens), console.error);
+        './save/gdmTokens.json', JSON.stringify(tokens || {}), (err) => {
+          if (err) console.error(err);
+        });
   };
 
   /**
@@ -79,7 +91,7 @@ function GDM() {
    * @param {http.ServerResponse} res Our response to the client.
    */
   function handler(req, res) {
-    if (req.headers.method !== 'POST') {
+    if (req.method !== 'POST') {
       res.writeHead(405);
       res.end('Only POST is accepted.');
     } else if (
@@ -94,7 +106,7 @@ function GDM() {
       req.on('end', function() {
         let code = '';
         try {
-          let parsed = querystring.parse(data);
+          let parsed = JSON.parse(data);
           code = parsed['code'];
         } catch (err) {
           self.common.error('Failed to parse request: ' + err.message, 'GDM');
@@ -103,7 +115,7 @@ function GDM() {
           return;
         }
         if (!code) {
-          console.log(parsed);
+          console.log('Failed to find code:', data);
           res.writeHead(400);
           res.end('Request does not contain code.');
           return;
@@ -114,9 +126,17 @@ function GDM() {
             res.end(err);
             return;
           }
-          receivedLoginInfo(JSON.parse(content));
-          res.writeHead(200);
-          res.end('Authorized');
+          let loginData = populateExpirations(JSON.parse(content));
+          fetchIdentity(loginData, function(userInfo) {
+            if (!userInfo) {
+              res.writeHead(401);
+              res.end('Failed to fetch user identity');
+              return;
+            }
+            tokens[userInfo.id] = loginData;
+            res.writeHead(200);
+            res.end('Authorized');
+          });
         });
       });
       req.on('close', function() {
@@ -126,6 +146,7 @@ function GDM() {
     } else {
       res.writeHead(404);
       res.end('404');
+      console.log('404', req.url);
     }
   }
 
@@ -136,13 +157,49 @@ function GDM() {
    * @param {Object} data User data.
    * @param {string} userId The id of the user the data belongs to.
    */
-  function receivedLoginInfo(data, userId) {
-    if (data && userId) {
+  function populateExpirations(data) {
+    if (data) {
       data.expires_at = data.expires_in * 1000 + Date.now();
       data.expiration_date = Date.now() + (1000 * 60 * 60 * 24 * 7);
-      tokens[userId] = data;
-      console.log('Received:', data);
     }
+    return data;
+  }
+
+  /**
+   * Fetches the identity of the user we have the token of.
+   *
+   * @private
+   * @param {LoginInfo} loginInfo The credentials of the session user.
+   * @param {singleCB} cb The callback storing the user's data, or null if
+   * something went wrong.
+   */
+  function fetchIdentity(loginInfo, cb) {
+    apiRequest(loginInfo, '/users/@me', (err, data) => {
+      if (!err) {
+        cb(JSON.parse(data));
+      } else {
+        cb(null);
+      }
+    });
+  }
+
+  /**
+   * Formats a request to the discord api at the given path.
+   *
+   * @private
+   * @param {LoginInfo} loginInfo The credentials of the user we are sending the
+   * request for.
+   * @param {string} path The path for the api request to send.
+   * @param {basicCallback} cb The response from the https request with error
+   * and data arguments.
+   */
+  function apiRequest(loginInfo, path, cb) {
+    let host = apiHost;
+    host.path = '/api' + path;
+    host.headers = {
+      'Authorization': loginInfo.token_type + ' ' + loginInfo.access_token,
+    };
+    discordRequest('', cb, host);
   }
 
   /**
@@ -165,8 +222,8 @@ function GDM() {
         if (response.statusCode == 200) {
           cb(null, content);
         } else {
-          hg.common.error(response.statusCode + ': ' + content);
-          console.log(host, data);
+          self.common.error(response.statusCode + ': ' + content);
+          console.log('Sent:', host, data);
           cb(response.statusCode + ' from discord');
         }
       });
@@ -177,7 +234,9 @@ function GDM() {
     } else {
       req.end();
     }
-    req.on('error', console.log);
+    req.on('error', (err) => {
+      if (err) console.log('Error', err);
+    });
   }
 
   /**
@@ -191,8 +250,8 @@ function GDM() {
    */
   function refreshToken(refresh_token, cb) {
     const data = {
-      client_id: self.Discord.id,
-      client_secret: self.Discord.secret,
+      client_id: auth.dmID,
+      client_secret: auth.dmSecret,
       grant_type: 'refresh_token',
       refresh_token: refresh_token,
       redirect_uri: 'https://www.spikeybot.com/redirect',
@@ -210,8 +269,8 @@ function GDM() {
    */
   function authorizeRequest(code, cb) {
     const data = {
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: auth.dmID,
+      client_secret: auth.dmSecret,
       grant_type: 'authorization_code',
       code: code,
       redirect_uri: 'https://www.spikeybot.com/redirect',
@@ -228,6 +287,9 @@ function GDM() {
    * @listens SpikeyBot~Command#gdm
    */
   function commandGDM(msg) {
+    self.common.reply(msg, 'This command is disabled.');
+    return;
+
     if (!tokens[msg.author.id]) {
       self.common.reply(
           msg, 'All users must give me permission to add them to a group DM. ' +
@@ -235,8 +297,9 @@ function GDM() {
           oauthURL);
       return;
     }
-    let users =
-        [{user: msg.author.id, accessToken: tokens[msg.author.id].token}];
+    let users = [
+      {user: msg.author.id, accessToken: tokens[msg.author.id].access_token}
+    ];
     let failed = [];
     msg.mentions.users.forEach((u) => {
       if (!tokens[u.id]) {
@@ -250,10 +313,17 @@ function GDM() {
     self.client.user.createGroupDM(users)
         .then((channel) => {
           channel.send('Hello!');
+          self.common.reply(msg, 'Created DM!');
         })
-        .catch(console.error);
+        .catch((err) => {
+          console.error('Failed to create GDM:', err, users);
+          self.common.reply(msg, 'Oopsies! An error occurred!');
+        });
     if (failed.length > 0) {
-      self.common.reply(msg, 'Failed to add: ' + failed.join(', '));
+      self.common.reply(
+          msg, 'Failed to add: ' + failed.join(', ') +
+              '.\nThey must give me permissionto add them to a group DM.',
+          oauthURL);
     }
   }
 }
