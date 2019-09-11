@@ -133,10 +133,11 @@ class Strings {
     try {
       localeGroup =
           require(`${this._stringsDir}${lang}${this._stringsFilename}`);
+      return localeGroup.get(key, rep);
     } catch (err) {
       console.error(`Unable to find locale: ${lang}`);
+      return null;
     }
-    return localeGroup.get(key, rep);
   }
 }
 

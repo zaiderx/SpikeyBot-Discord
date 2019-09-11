@@ -12,6 +12,15 @@ class Locale {
    */
   constructor() {
     this.get = this.get.bind(this);
+
+    /**
+     * @description The bot's username.
+     */
+    this.username = 'SpikeyBot';
+    /**
+     * @description Empty string to replace with passed data.
+     */
+    this.fillOne = '{}';
   }
 
   /**

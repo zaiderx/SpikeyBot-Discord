@@ -10,6 +10,9 @@ const FuzzySearch = require('fuzzy-search');
 const MessageMaker = require('./lib/MessageMaker.js');
 require('./subModule.js').extend(HG);  // Extends the SubModule class.
 
+delete require.cache[require.resolve('./locale/Strings.js')];
+const Strings = require('./locale/Strings.js');
+
 /**
  * @classdesc Hunger Games simulator subModule.
  * @class
@@ -47,6 +50,16 @@ function HG() {
   this.getHG = function() {
     return hg;
   };
+
+  /**
+   * @description Instance of locale string manager.
+   * @private
+   * @type {Strings}
+   * @default
+   * @constant
+   */
+  const strings = new Strings('hg');
+  strings.purge();
 
   /**
    * The maximum number of bytes allowed to be received from a client in an
@@ -327,24 +340,6 @@ function HG() {
     }
     updateBattles();
   });
-
-  /**
-   * @description Reply to help on a server.
-   *
-   * @private
-   * @type {string}
-   * @default
-   */
-  const helpmessagereply = 'I sent you a DM with commands!';
-  /**
-   * @description Reply if unable to send message via DM.
-   *
-   * @private
-   * @type {string}
-   * @default
-   */
-  const blockedmessage =
-      'I couldn\'t send you a message, you probably blocked me :(';
   /**
    * @description The object that stores all data to be formatted into the help
    * message.
@@ -459,8 +454,6 @@ function HG() {
             if (self.common.trustedIds.includes(msg.author.id)) {
               self.save('async');
               msg.channel.send('`Saving all data.`');
-            } else {
-              self.common.reply(msg, 'You can\'t do that.', 'No');
             }
           },
           cmdOpts),
@@ -527,24 +520,22 @@ function HG() {
                 const searched = cmdSearcher.search(toSearch);
                 if (searched && searched.length > 0) {
                   if (searched.length > 1) {
-                    self.common.reply(
-                        msg, 'Hmm, did you mean one of the following commands?',
+                    reply(
+                        msg, 'unknownCommandSuggestionList', 'fillOne',
                         searched
-                            .map((el) => {
-                              return msg.prefix + self.postPrefix + el;
-                            })
+                            .map((el) => `${msg.prefix}${self.postPrefix}${el}`)
                             .join('\n'));
                   } else {
-                    self.common.reply(
-                        msg, 'Hmm, did you mean "' + msg.prefix +
-                            self.postPrefix + searched[0] + '"?');
+                    reply(
+                        msg, 'unknownCommandSuggestOne', 'fillOne',
+                        `${msg.prefix}${self.postPrefix}${searched[0]}`);
                   }
                   return;
                 }
               }
-              self.common.reply(
-                  msg, 'Oh noes! I can\'t understand that! "' + msg.prefix +
-                      self.postPrefix + 'help" for help.');
+              reply(
+                  msg, 'unknownCommand', 'unknownCommandHelp',
+                  `${msg.prefix}${self.postPrefix}`);
             },
             null, subCmds);
     self.command.on(hgCmd);
@@ -664,14 +655,6 @@ function HG() {
    */
   function mkCmd(cb) {
     return function(msg) {
-      /* if (msg.guild.memberCount > 20000) {
-        self.common.reply(
-            msg,
-            'Sorry, but HG has been temporarily disabled on servers larger' +
-                ' than 20000 people.',
-            'More information on my support server.');
-        return;
-      } */
       const id = msg.guild.id;
       const cached = hg._games[id];
       hg.fetchGame(id, (game) => {
@@ -680,21 +663,13 @@ function HG() {
             setTimeout(() => {
               if (!hg._games[id]) return;
               if (!game.legacyEvents) return;
-              self.common.reply(
-                  msg, 'Important Legacy Event Notice',
-                  'Storage for custom events has been updated.\nUse `' +
-                      msg.prefix + self.postPrefix +
-                      'claimlegacy` to move all custom events to your account' +
-                      '.\n\nBe aware that whoever runs the command, will be ' +
-                      'the only one who can edit the events, and will have ' +
-                      'sole ownership of the events.\n\nCustom events will ' +
-                      'not be used in the game until they have been claimed.');
+              reply(
+                  msg, 'legacyEventNoticeTitle', 'legacyEventNoticeBody',
+                  `${msg.prefix}${self.postPrefix}`);
             }, 1000);
           }
           if (game.loading) {
-            self.common.reply(
-                msg, 'Still loading', 'A previous command is still loading. ' +
-                    'Please wait for it to complete.');
+            reply(msg, 'loadingTitle', 'loadingBody');
             return;
           }
           game.channel = msg.channel.id;
@@ -735,6 +710,23 @@ function HG() {
   }
 
   /**
+   * @description Reply to msg with locale strings.
+   * @private
+   *
+   * @param {external:Discord~Message} msg Message to reply to.
+   * @param {?string} titleKey String key for the title, or null for default.
+   * @param {string} bodyKey String key for the body message.
+   * @param {string} [rep] Placeholder replacements for the body only.
+   * @returns {Promise<external:Discord~Message>} Message send promise from
+   * {@link external:Discord}.
+   */
+  function reply(msg, titleKey, bodyKey, ...rep) {
+    return self.common.reply(
+        msg, strings.get(titleKey, msg.locale),
+        strings.get(bodyKey, msg.locale, rep));
+  }
+
+  /**
    * Tell a user their chances of winning have not increased.
    *
    * @private
@@ -743,7 +735,7 @@ function HG() {
    * @listens Command#hg makemelose
    */
   function commandMakeMeWin(msg) {
-    self.common.reply(msg, 'Everyone\'s probability of winning has increased!');
+    reply(msg, 'makeMeWin');
   }
 
   /**
@@ -755,8 +747,7 @@ function HG() {
    * @listens Command#hg makemelose
    */
   function commandMakeMeLose(msg) {
-    self.common.reply(
-        msg, `Your probability of losing has increased by ${nothing()}!`);
+    reply(msg, null, 'makeMeLose', nothing());
   }
 
   /**
@@ -1151,7 +1142,7 @@ function HG() {
    */
   function resetGame(msg, id) {
     const command = msg.text.trim().split(' ')[0];
-    self.common.reply(msg, 'Reset HG', hg.resetGame(id, command));
+    reply(msg, 'resetTitle', hg.resetGame(id, command));
   }
   /**
    * Send all of the game data about the current server to the chat.
@@ -1191,30 +1182,20 @@ function HG() {
   function startGame(msg, id) {
     const game = hg.getGame(id);
     if (game && game.currentGame && game.currentGame.inProgress) {
-      self.common.reply(
-          msg, 'A game is already in progress! ("' + msg.prefix +
-              self.postPrefix + 'next" for next day, or "' + msg.prefix +
-              self.postPrefix + 'end" to abort)');
+      const prefix = `${msg.prefix}${self.postPrefix}`;
+      reply(msg, 'startInProgressTitle', 'startInProgressBody', prefix, prefix);
       return;
     }
     const myPerms = msg.channel.permissionsFor(self.client.user.id);
     if (!myPerms || !myPerms.has(self.Discord.Permissions.FLAGS.ATTACH_FILES)) {
-      self.common.reply(
-          msg, 'Sorry, but I need permission to send images ' +
-              'in this channel before I can start the games.\nPlease ensure' +
-              ' I have the "Attach Files" permission in this channel.',
-          myPerms ? null :
-                    'This is probably an error, this should be fixed soon.');
+      reply(msg, 'startNoAttachFiles');
       if (!myPerms) {
         self.error(
             'Failed to fetch perms for myself. ' + (msg.guild.me && true));
       }
       return;
     } else if (!myPerms.has(self.Discord.Permissions.FLAGS.EMBED_LINKS)) {
-      self.common.reply(
-          msg, 'Sorry, but I need permission to embed messages ' +
-              'in this channel before I can start the games.\nPlease ensure' +
-              ' I have the "Embed Links" permission in this channel.');
+      reply(msg, 'startNoEmbedLinks');
       return;
     } else if (!myPerms.has(self.Discord.Permissions.FLAGS.SEND_MESSAGES)) {
       return;
@@ -1223,7 +1204,7 @@ function HG() {
       self.endReactJoinMessage(id, (err) => {
         if (err) {
           self.error(`${err}: ${id}`);
-          self.common.reply(msg, 'React Join Failed', err);
+          reply(msg, 'reactFailedTitle', err);
         }
         startGame(msg, id);
       });
@@ -1255,7 +1236,7 @@ function HG() {
           if (game.currentGame) game.currentGame.inProgress = false;
         }
         self.warn('Failed to create game to start game');
-        self.common.reply(msg, 'Failed to create game for unknown reason.');
+        reply(msg, 'createFailedUnknown');
         return;
       }
 
@@ -1274,9 +1255,7 @@ function HG() {
       }
 
       msg.channel.send(mentions, finalMessage).catch((err) => {
-        self.common.reply(
-            msg, 'Game started!',
-            'Discord rejected my normal message for some reason...');
+        reply(msg, 'startedTitle', 'startMessageRejected');
         self.error(
             'Failed to send start game message: ' + msg.channel.id + ' (Num: ' +
             g.currentGame.includedUsers.length + ')');
@@ -1356,25 +1335,18 @@ function HG() {
    * @param {string} id The id of the guild this was triggered from.
    */
   function pauseAutoplay(msg, id) {
-    if (!hg.getGame(id)) {
-      self.common.reply(
-          msg, 'Not autoplaying. If you wish to autoplay, type "' + msg.prefix +
-              self.postPrefix + 'autoplay".');
+    if (!hg.getGame(id) || !hg.getGame(id).autoPlay) {
+      if (msg && msg.channel) {
+        reply(
+            msg, 'pauseAutoNoAutoTitle', 'pauseAutoNoAutoBody',
+            `${msg.prefix}${self.postPrefix}`);
+      }
       return;
     }
-    if (hg.getGame(id).autoPlay) {
-      if (msg && msg.channel) {
-        msg.channel.send(
-            '<@' + msg.author.id +
-            '> `Autoplay will stop at the end of the current day.`');
-      }
-      hg.getGame(id).autoPlay = false;
-    } else {
-      if (msg && msg.channel) {
-        self.common.reply(
-            msg, 'Not autoplaying. If you wish to autoplay, type "' +
-                msg.prefix + self.postPrefix + 'autoplay".');
-      }
+    hg.getGame(id).autoPlay = false;
+    if (msg && msg.channel) {
+      msg.channel.send(strings.get('pauseAuto', msg.locale, msg.author.id))
+          .catch(() => {});
     }
   }
   /**
@@ -1391,7 +1363,7 @@ function HG() {
     if (!game || !game.currentGame) {
       createGame(msg, id, false, (game) => {
         if (!game) {
-          self.common.reply(msg, 'Failed to create game for unknown reason.');
+          reply(msg, 'createFailedUnknown');
           return;
         }
         startAutoplay(msg, id, game);
@@ -1400,9 +1372,9 @@ function HG() {
     }
     if (game.autoPlay && game.currentGame.inProgress) {
       if (game.currentGame.isPaused) {
-        self.common.reply(
-            msg, 'Autoplay is already enabled.', 'To resume the game, use `' +
-                msg.prefix + self.postPrefix + 'resume`.');
+        reply(
+            msg, 'startAutoAlreadyEnabled', 'resumeAutoInstructions',
+            `${msg.prefix}${self.postPrefix}`);
       } else {
         pauseAutoplay(msg, id);
       }
@@ -1410,33 +1382,28 @@ function HG() {
       game.autoPlay = true;
       if (game.currentGame.inProgress && game.currentGame.day.state === 0) {
         if (self.command.validate(msg.prefix + 'hg next', msg)) {
-          self.common.reply(
-              msg,
-              'Sorry, but you don\'t have permission to start the next day ' +
-                  'in the games.');
+          reply(msg, 'noPermNext');
           return;
         }
-        msg.channel.send(
-            '<@' + msg.author.id +
-            '> `Enabling Autoplay! Starting the next day!`');
         nextDay(msg, id);
+        msg.channel.send(strings.get('startAutoDay', msg.locale, msg.author.id))
+            .catch(() => {});
       } else if (!game.currentGame.inProgress) {
         if (self.command.validate(msg.prefix + 'hg start', msg)) {
-          self.common.reply(
-              msg, 'Sorry, but you don\'t have permission to start the games.',
-              'hg start');
+          reply(msg, 'noPermStart');
           return;
         }
-        msg.channel.send(
-            '<@' + msg.author.id +
-            '> `Autoplay is enabled. Starting the games!`');
+        msg.channel
+            .send(strings.get('startAutoGame', msg.locale, msg.author.id))
+            .catch(() => {});
         startGame(msg, id);
       } else if (game.currentGame.isPaused) {
-        self.common.reply(
-            msg, 'Enabling Autoplay',
-            'Resume game with `' + msg.prefix + self.postPrefix + 'resume`.');
+        reply(
+            msg, 'enableAutoTitle', 'resumeAutoInstructions',
+            `${msg.prefix}${self.postPrefix}`);
       } else {
-        msg.channel.send('<@' + msg.author.id + '> `Enabling autoplay!`');
+        msg.channel.send(strings.get('enableAuto', msg.locale, msg.author.id))
+            .catch(() => {});
       }
     }
   }
@@ -3897,17 +3864,11 @@ function HG() {
     msg.author.send(self.helpMessage)
         .then(() => {
           if (msg.guild != null) {
-            self.common.reply(msg, helpmessagereply, ':wink:').catch((err) => {
-              self.error(
-                  'Failed to send HG help message reply in channel: ' +
-                  msg.channel.id);
-              console.error(err);
-            });
+            reply(msg, 'helpMessageSuccess', 'fillOne', ':wink:')
+                .catch(() => {});
           }
         })
-        .catch(() => {
-          self.common.reply(msg, blockedmessage).catch(() => {});
-        });
+        .catch(() => reply(msg, 'helpMessageFailed').catch(() => {}));
   }
 
   /**
@@ -4809,7 +4770,7 @@ function HG() {
    * @public
    * @param {string} id The guild id of which to end the react join.
    * @param {Function} [cb] Callback once this is complete. First parameter is a
-   * string if error, null otherwise, the second is a string with info if
+   * string key if error, null otherwise, the second is a string with info if
    * success or null otherwise.
    */
   this.endReactJoinMessage = function(id, cb) {
@@ -4818,8 +4779,7 @@ function HG() {
         !hg.getGame(id).reactMessage.id ||
         !hg.getGame(id).reactMessage.channel) {
       hg.getGame(id).reactMessage = null;
-      cb('Unable to find message with reactions. ' +
-         'Was a join via react started?');
+      cb('reactFailedNotStarted');
       return;
     }
 
@@ -4830,7 +4790,7 @@ function HG() {
         hg.getGame(id).reactMessage.channel);
     if (!channel) {
       hg.getGame(id).reactMessage = null;
-      cb('Unable to find message with reactions. Was the channel deleted?');
+      cb('reactFailedNoChannel');
       return;
     }
     channel.messages.fetch(hg.getGame(id).reactMessage.id)
@@ -4852,7 +4812,7 @@ function HG() {
         .catch((err) => {
           console.error(err);
           hg.getGame(id).reactMessage = null;
-          cb('Unable to find message with reactions. Was it deleted?');
+          cb('reactFailedNoMessage');
         });
     let list = new self.Discord.Collection();
     /**
@@ -4875,7 +4835,7 @@ function HG() {
         hg.getGame(id).reactMessage = null;
         msg.edit('`Ended`').catch(() => {});
         if (list.size == 0) {
-          cb(null, 'No users reacted.');
+          cb(null, 'reactNoUsers');
         } else {
           self.includeUsers(list, id, (res) => cb(null, res));
         }
