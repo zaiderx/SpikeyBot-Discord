@@ -1,6 +1,8 @@
 // Copyright 2019 Campbell Crowley. All rights reserved.
 // Author: Campbell Crowley (dev@campbellcrowley.com)
 const fs = require('fs');
+
+delete require.cache[require.resolve('./Locale.js')];
 const Locale = require('./Locale.js');
 /**
  * @description Static strings for Pets.
@@ -133,7 +135,7 @@ class Strings {
     try {
       localeGroup =
           require(`${this._stringsDir}${lang}${this._stringsFilename}`);
-      return localeGroup.get(key, rep);
+      return localeGroup.get(key, ...rep);
     } catch (err) {
       console.error(`Unable to find locale: ${lang}`);
       return null;
