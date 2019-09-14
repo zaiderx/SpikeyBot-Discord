@@ -246,9 +246,7 @@ function Command() {
      *
      * @type {string[]}
      */
-    this.aliases = cmd.map((el) => {
-      return el.toLowerCase();
-    });
+    this.aliases = cmd.map((el) => el.toLowerCase());
 
     /**
      * Sub commands for this single command. Triggered by commands separated by

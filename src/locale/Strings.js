@@ -12,7 +12,7 @@ class Strings {
    * @description Strings.
    * @param {string} [filename='global'] Filename to read strings from each
    * locale. Excluding path and extension.
-   * @param {string} [dir='../..//strings/'] Path to find folder of available
+   * @param {string} [dir='../../strings/'] Path to find folder of available
    * locales, relative to this file.
    * @param {string} [defaultLocale='en_US'] Default and fallback locale to use
    * when unspecified or no string in given locale is found.
@@ -107,6 +107,7 @@ class Strings {
         return;
       }
       for (const f of files) {
+        if (f.endsWith('.json')) continue;
         delete require.cache[require.resolve(
             `${this._stringsDir}${f}${this._stringsFilename}`)];
       }
@@ -140,6 +141,24 @@ class Strings {
       console.error(`Unable to find locale: ${lang}`);
       return null;
     }
+  }
+
+  /**
+   * @description Reply to msg with locale strings.
+   * @public
+   *
+   * @param {Common} common Reference to Common for reply helper.
+   * @param {external:Discord~Message} msg Message to reply to.
+   * @param {?string} titleKey String key for the title, or null for default.
+   * @param {string} bodyKey String key for the body message.
+   * @param {string} [rep] Placeholder replacements for the body only.
+   * @returns {Promise<external:Discord~Message>} Message send promise from
+   * {@link external:Discord}.
+   */
+  reply(common, msg, titleKey, bodyKey, ...rep) {
+    return common.reply(
+        msg, this.get(titleKey, msg.locale),
+        this.get(bodyKey, msg.locale, ...rep));
   }
 }
 
