@@ -755,36 +755,45 @@ function Command() {
       if (failure && failure.endsWith('Muted')) {
         return true;
       } else if (failure === 'Guild Only') {
-        self.common.reply(msg, onlyservermessage);
+        self.common.reply(msg, onlyservermessage).catch(() => {});
         return true;
       } else if (failure === 'Disabled') {
-        self.common.reply(
-            msg, 'This command has not been enabled for you here.');
+        self.common
+            .reply(msg, 'This command has not been enabled for you here.')
+            .catch(() => {});
         return true;
       } else if (failure === 'Disabled Individual') {
-        self.common.reply(
-            msg, 'You do not have permission for this command here.');
+        self.common
+            .reply(msg, 'You do not have permission for this command here.')
+            .catch(() => {});
         return true;
       } else if (failure === 'User Disabled') {
-        self.common.reply(
-            msg, 'This command has been disabled by an admin here.');
+        self.common
+            .reply(msg, 'This command has been disabled by an admin here.')
+            .catch(() => {});
         return true;
       } else if (failure === 'User Disabled Individual') {
-        self.common.reply(
-            msg, 'An admin has prevented you from using this command here.');
+        self.common
+            .reply(
+                msg, 'An admin has prevented you from using this command here.')
+            .catch(() => {});
         return true;
       } else if (failure) {
         if (failure.startsWith('NoPerm:')) {
-          self.common.reply(
-              msg, 'You must have one of the following permissions ' +
-                  'to use this command:\n' +
-                  failure.substring(7, failure.length));
+          self.common
+              .reply(
+                  msg, 'You must have one of the following permissions ' +
+                      'to use this command:\n' +
+                      failure.substring(7, failure.length))
+              .catch(() => {});
           return true;
         } else {
-          self.common.reply(
-              msg, 'I am unable to attempt this command for ' +
-                  'you due of an unknown reason.',
-              failure);
+          self.common
+              .reply(
+                  msg, 'I am unable to attempt this command for ' +
+                      'you due of an unknown reason.',
+                  failure)
+              .catch(() => {});
           self.error('Comand failed: ' + msg.cmd + ': ' + failure);
           return true;
         }
@@ -796,7 +805,7 @@ function Command() {
       } catch (err) {
         self.error(msg.cmd + ': FAILED');
         console.error(err);
-        self.common.reply(msg, 'An error occurred! Oh noes!');
+        self.common.reply(msg, 'An error occurred! Oh noes!').catch(() => {});
       }
       return true;
     } else {
@@ -838,6 +847,7 @@ function Command() {
    * for.
    */
   this.removeListener = function(cmd) {
+    if (!cmds) return;
     if (typeof cmd === 'string') {
       const obj = Object.entries(cmds).find((el) => {
         return el[1].aliases.includes(cmd);
