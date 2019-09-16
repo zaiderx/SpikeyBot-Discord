@@ -116,6 +116,9 @@ class EnUsHG extends Locale {
         'before I can start the games.';
     this.nextDayPermEmbedBody =
         'Please ensure I have the "Embed Links" permission in this channel.';
+    this.noPermNext =
+        'Sorry, but you don\'t have permission to start the next day in the ' +
+        'games.';
     this.endGameNoGame = 'There isn\'t a game in progress.';
     this.endGameLoading =
         'Game is currently loading. Please wait, then try again.';
@@ -160,10 +163,14 @@ class EnUsHG extends Locale {
     this.includeWhitelist = '{} added to whitelist.';
     this.excludeFailedUnknown = 'Failed to remove {} for an unknown reason.';
 
+    this.playerRefreshInfo = 'To refresh: `{}create`';
+
+    this.gameNotCreated = 'A game has not been created yet.';
+    this.messageRejected =
+        'Oops, Discord rejected my message for some reason...';
+    this.listPlayerTitle = 'List of players';
+
     this.success = 'Success';
-    this.noPermNext =
-        'Sorry, but you don\'t have permission to start the next day in the ' +
-        'games.';
   }
 }
 

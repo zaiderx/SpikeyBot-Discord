@@ -33,8 +33,9 @@ class Locale {
    * find.
    */
   get(key, ...rep) {
-    const s = this[key];
+    let s = this[key];
     let i = 0;
+    if (Array.isArray(s)) s = s[Math.floor(Math.random() * s.length)];
     if (typeof s === 'string') {
       return s.replace(/\{(\d*)\}/g, (m, p) => {
         let out = rep[i++];
