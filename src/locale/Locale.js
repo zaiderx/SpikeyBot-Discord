@@ -34,9 +34,14 @@ class Locale {
    */
   get(key, ...rep) {
     const s = this[key];
-    let i = -1;
+    let i = 0;
     if (typeof s === 'string') {
-      return s.replace(/\{\}/g, () => rep[++i]);
+      return s.replace(/\{(\d*)\}/g, (m, p) => {
+        let out = rep[i++];
+        p *= 1;
+        if (p >= 0 && p < rep.length) out = rep[p];
+        return out;
+      });
     } else {
       return null;
     }
