@@ -115,6 +115,30 @@ class Strings {
   }
 
   /**
+   * @description Get the locale group of the given locale.
+   * @public
+   * @param {string} locale The locale to fetch.
+   * @returns {?Locale} The locale group, or null if couldn't be found.
+   */
+  getGroup(locale) {
+    const match = Strings.parseLocale(locale || this._stringsDefault);
+    let localeGroup = this.defaultLocale;
+    let lang = this._stringsDefault;
+    if (!match) {
+      console.error(`Bad locale: ${locale}. Using default.`);
+    } else {
+      lang = `${match.language}_${match.territory}`;
+      try {
+        localeGroup =
+            require(`${this._stringsDir}${lang}${this._stringsFilename}`);
+      } catch (err) {
+        console.error(`Unable to find locale: ${lang}. Using default.`, err);
+      }
+    }
+    return localeGroup;
+  }
+
+  /**
    * @description Get and format a specific string.
    *
    * @public
@@ -125,22 +149,12 @@ class Strings {
    * @returns {?string} Matched and replaced string, or null if unable to find.
    */
   get(key, locale, ...rep) {
-    const match = Strings.parseLocale(locale || this._stringsDefault);
-    let localeGroup = this.defaultLocale;
-    let lang = this._stringsDefault;
-    if (!match) {
+    const localeGroup = this.getGroup(locale);
+    if (!localeGroup) {
       console.error(`Unable to find locale: ${locale}`);
-    } else {
-      lang = `${match.language}_${match.territory}`;
-    }
-    try {
-      localeGroup =
-          require(`${this._stringsDir}${lang}${this._stringsFilename}`);
-      return localeGroup.get(key, ...rep);
-    } catch (err) {
-      console.error(`Unable to find locale: ${lang}`);
       return null;
     }
+    return localeGroup.get(key, ...rep);
   }
 
   /**
