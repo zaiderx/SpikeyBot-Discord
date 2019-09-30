@@ -3,6 +3,7 @@
 const fs = require('fs');
 const http = require('http');
 const auth = require('../../auth.js');
+const crypto = require('crypto');
 const sIOClient = require('socket.io-client');
 const SubModule = require('../subModule.js');
 
@@ -121,6 +122,7 @@ class WebApi extends SubModule {
   }
   /** @inheritdoc */
   shutdown() {
+    fs.unwatchFile(this._rateLimitFile);
     if (this._app) {
       this._app.close();
       this._app = null;
@@ -140,12 +142,25 @@ class WebApi extends SubModule {
     const url = req.url.replace(/^\/www.spikeybot.com(?:\/dev)?/, '');
     if (url.startsWith('/api')) {
       this._apiRequest(req, res, url, ip);
+    } else if (url === '/webhook/twitch/') {
+      if (req.method === 'GET') {
+        this._twitchConfirmation(req, res, url, ip);
+      } else if (req.method === 'POST') {
+        this._twitchWebhook(req, res, url, ip);
+      } else {
+        res.writeHead(405);
+        res.end();
+        this.common.log(
+            'Requested endpoint with invalid method: ' + req.method + ' ' +
+                req.url + ' ' + url + ' ' + req.headers['queries'],
+            ip);
+      }
     } else if (req.method !== 'POST') {
       res.writeHead(405);
       res.end();
       this.common.log(
           'Requested endpoint with invalid method: ' + req.method + ' ' +
-              req.url,
+              req.url + ' ' + url,
           ip);
     } else if (url.startsWith('/webhook/botstart')) {
       this.common.logDebug('Bot start webhook request: ' + req.url, ip);
@@ -169,9 +184,7 @@ class WebApi extends SubModule {
       res.end();
     } else {
       let content = '';
-      req.on('data', (chunk) => {
-        content += chunk;
-      });
+      req.on('data', (chunk) => content += chunk);
       req.on('end', () => {
         console.log(content);
         res.writeHead(204);
@@ -395,6 +408,181 @@ class WebApi extends SubModule {
       } catch (e) {
         console.error(e);
       }
+    });
+  }
+
+  /**
+   * @description Handle a request from Twitch to confirm adding a webhook to
+   * this endpoint.
+   * @private
+   * @param {http.IncomingMessage} req Client request.
+   * @param {http.ServerResponse} res Server response.
+   * @param {string} url The requested url. Generally a similar or slightly
+   * modified version of `req.url`.
+   * @param {string} ip IP for logging purposes.
+   */
+  _twitchConfirmation(req, res, url, ip) {
+    const query = req.headers['queries'];
+    if (!query || query.length < 2) {
+      this.common.logDebug('400: ' + req.url + ' ' + query, ip);
+      res.writeHead(400);
+      res.end();
+      return;
+    }
+
+    const queries = {};
+    query.split('&').forEach((el) => {
+      const pair = el.split('=');
+      queries[pair[0]] = pair[1];
+    });
+    const decode =
+        queries['hub.topic'] && decodeURIComponent(queries['hub.topic']);
+    const match = decode && decode.match(/user_id=(\d+)/);
+    const id = match && match[1];
+    if (!id) {
+      this.common.logDebug(
+          '403 Invalid ID: ' + decode + ' ' + req.url + ' ' + query, ip);
+      res.writeHead(403);
+      res.end('403: Forbidden. Invalid ID.');
+      return;
+    }
+
+    const toSend = global.sqlCon.format(
+        'SELECT streamChangedState FROM TwitchUsers WHERE id=?', [id]);
+    global.sqlCon.query(toSend, (err, rows) => {
+      if (err) {
+        this.common.logDebug('500: ' + req.url + ' ' + query, ip);
+        this.common.error(
+            'Failed to check if attempting to Twitch confirm webhook: ' + id,
+            ip);
+        console.log(err);
+        res.writeHead(500);
+        res.end('500: Internal Server Error');
+        return;
+      }
+      if (rows && rows[0] && rows[0].streamChangedState >= 1) {
+        this.common.logDebug('200 Confirming: ' + req.url + ' ' + query, ip);
+        res.writeHead(200);
+        res.end(queries['hub.challenge']);
+
+        const toSend = global.sqlCon.format(
+            'UPDATE TwitchUsers SET streamChangedState=2, expiresAt=' +
+                'FROM_UNIXTIME(?) WHERE id=?',
+            [
+              Math.floor(Date.now() / 1000) + queries['hub.lease_seconds'] * 1,
+              id,
+            ]);
+        global.sqlCon.query(toSend, (err) => {
+          if (err) {
+            this.common.error(
+                'Failed to update streamChangedState to confirmed: ' + id, ip);
+            console.log(err);
+            res.writeHead(500);
+            res.end('500: Internal Server Error');
+            return;
+          }
+        });
+      } else {
+        this.common.logDebug(
+            '403 Invalid ID: ' +
+                ' ' + (rows && rows[0] && rows[0].streamChangedState) + ' ' +
+                req.url + ' ' + query,
+            ip);
+        res.writeHead(403);
+        res.end('403: Forbidden. Invalid ID.');
+      }
+    });
+  }
+
+  /**
+   * @description Handle a webhook event from Twitch.
+   * @private
+   * @param {http.IncomingMessage} req Client request.
+   * @param {http.ServerResponse} res Server response.
+   * @param {string} url The requested url. Generally a similar or slightly
+   * modified version of `req.url`.
+   * @param {string} ip IP for logging purposes.
+   */
+  _twitchWebhook(req, res, url, ip) {
+    const query = req.headers['queries'];
+    this.common.log('Twitch Webhook: ' + req.url + ' ' + query, ip);
+    let content = '';
+    req.on('data', (c) => content += c);
+    req.on('end', () => {
+      const hmac = crypto.createHmac('sha256', auth.twitchSubSecret);
+      hmac.update(content);
+      const sig = `sha256=${hmac.digest('hex')}`;
+      const sigReq = req.headers['x-hub-signature'];
+      const verified = sig === sigReq;
+      if (!verified) {
+        this.common.error('Failed to verify webhook signature!');
+        console.error(
+            'Lengths:', req.headers['content-length'], content.length,
+            'Signatures: ' + sigReq, sig);
+        res.writeHead(403);
+        res.end('403: Forbidden');
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (err) {
+        this.common.logDebug(
+            'Failed to parse body of Twitch Webhook: ' + content, ip);
+        console.error(err);
+        res.writeHead(400);
+        res.end('400: Bad Request');
+        return;
+      }
+      const data = parsed.data && parsed.data[0];
+      if (parsed.data && parsed.data.length === 0) {
+        this.common.logDebug('Empty webhook from Twitch: ' + content, ip);
+        res.writeHead(204);
+        res.end();
+        return;
+      } else if (!data) {
+        this.common.logDebug(
+            'Invalid webhook body from Twitch: ' + content, ip);
+        res.writeHead(400);
+        res.end('400: Bad Request');
+        return;
+      }
+      this.common.logDebug('Twitch Webhook: ' + content, ip);
+      const toSend = global.sqlCon.format(
+          'SELECT * FROM TwitchDiscord WHERE twitchId=? AND bot=?',
+          [data.user_id, this.client.user.id]);
+      global.sqlCon.query(toSend, (err, rows) => {
+        if (err) {
+          this.common.error('Failed to fetch TwitchDiscord database info.', ip);
+          console.error(err);
+          res.writeHead(500);
+          res.end('500: Internal Server Error');
+          return;
+        }
+        const ids = JSON.stringify(rows.map((el) => el.channel));
+        if (this.client.shard) {
+          this.client.shard
+              .broadcastEval(`this.twitchWebhookHandler(${ids}, ${content})`)
+              .then(() => {
+                res.writeHead(204);
+                res.end();
+              })
+              .catch((err) => {
+                this.error('Failed to broadcast webhook handler to shards.');
+                console.error(err);
+              });
+        } else {
+          const sm = this.bot.getSubmodule('./twitch.js');
+          if (!sm) {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          sm.webhookHandler(ids, content);
+          res.writeHead(204);
+          res.end();
+        }
+      });
     });
   }
 }
